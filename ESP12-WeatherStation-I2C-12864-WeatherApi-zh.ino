@@ -478,9 +478,7 @@ void updateData(bool isInitialBoot) {
     drawProgress("正在更新...", "本地天气实况...");
   }
   // WeatherAPI.com's forecast.json returns current conditions + forecast in one
-  // request, so - unlike the old HeWeather current/forecast split - both are
-  // refreshed together every update instead of forecast being fetched separately
-  // only a few times a day.
+  // request, so both are refreshed together on every update.
   weatherClient.updateWeather(&currentWeather, forecasts, WEATHERAPI_APP_ID, WEATHERAPI_LOCATION, WEATHERAPI_LANGUAGE, MAX_FORECASTS);
 
   if (!dummyMode)
@@ -728,7 +726,7 @@ void drawForecastDetails(int dayIndex) {
 
   // each Chinese character's length is 3 in UTF-8
   // WeatherAPI.com's daily forecast has one overall condition, not a separate
-  // day/night pair like the old HeWeather forecast did.
+  // day/night pair.
   stringText = String("天气:" + forecasts[dayIndex].text);
   stringText.replace("\"", "");
   stringText.trim();

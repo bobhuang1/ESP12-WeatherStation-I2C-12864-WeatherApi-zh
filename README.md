@@ -1,4 +1,4 @@
-# ESP12-WeatherStation-I2C-12864-HeWeather-zh
+# ESP12-WeatherStation-I2C-12864-WeatherApi-zh
 
 ESP-12 (ESP8266) weather station: shows local outside weather + a 5-day
 forecast on a 128x64 SPI LCD, plus an internal DHT temperature/humidity
@@ -36,16 +36,13 @@ two additional world cities' current conditions.
 
 ## Notes
 
-- Originally used a now-defunct HeWeather API endpoint; migrated to
-  [WeatherAPI.com](https://www.weatherapi.com/) (see
-  [esp8266-weather-WeatherApi](https://github.com/bobhuang1/esp8266-weather-WeatherApi)).
-  Because WeatherAPI.com returns current conditions + forecast in a single
-  request, this sketch now refreshes both together on the same interval
-  (`UPDATE_INTERVAL_SECS`) instead of fetching the forecast separately only a
-  few times a day as the old code did.
-- WeatherAPI.com's daily forecast has one overall condition per day (not a
-  separate day/night pair) and a peak wind speed with no direction - the
-  forecast page's wind/condition display was adjusted accordingly. See
+- Weather data comes from [WeatherAPI.com](https://www.weatherapi.com/)
+  (see [esp8266-weather-WeatherApi](https://github.com/bobhuang1/esp8266-weather-WeatherApi)).
+  Current conditions and the forecast are returned in a single request, so
+  this sketch refreshes both together on the same interval
+  (`UPDATE_INTERVAL_SECS`).
+- The daily forecast has one overall condition per day (not a separate
+  day/night pair) and a peak wind speed with no direction - see
   esp8266-weather-WeatherApi's README for details.
 - `#define LANGUAGE_CN` / comment it out to switch the on-screen text between
   Chinese and English.
