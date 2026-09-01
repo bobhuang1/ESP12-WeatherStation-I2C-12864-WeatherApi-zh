@@ -14,18 +14,19 @@ two additional world cities' current conditions.
 
 1. Install dependencies: `U8g2`, `WiFiManager`, `DHT sensor library` (+
    `Adafruit Unified Sensor`), `Timezone`, `JsonStreamingParser`.
-2. This sketch vendors two shared dependencies directly so it builds
+2. This sketch vendors its shared dependencies directly so it builds
    standalone - **replace their placeholder credentials/locations before
    flashing**:
    - `WeatherApiWeather.h`/`.cpp` ([source](https://github.com/bobhuang1/esp8266-weather-WeatherApi)) -
      set `WEATHERAPI_LOCATION` (and `WEATHERAPI_LOCATION1`/`WEATHERAPI_LOCATION2`
      if you enable `SHOW_US_CITIES`) below the `#include`s to real city names,
-     and set `WEATHERAPI_APP_ID` in `GarfieldCommon.h` to your
+     and set `WEATHERAPI_APP_ID` (also below the `#include`s) to your
      [WeatherAPI.com](https://www.weatherapi.com/) key.
-   - `GarfieldCommon.h`/`.cpp` ([source](https://github.com/bobhuang1/ESP8266-Garfield-Common)) -
-     see that repo's README for the full placeholder list (WiFi
-     credentials) and security notes.
-   - If you update either shared library, re-copy the files here.
+   - `StringHelpers`, `AlarmBeeper`, `WiFiMultiConnect`, `WeatherDisplayHelpers`,
+     `BootSplashBitmap` ([source](https://github.com/bobhuang1/ESP8266-Functions-Common)) -
+     set `WIFI_SSIDS`/`WIFI_PASSWORDS` to your own network(s), or enable
+     `USE_WIFI_MANAGER` instead of hardcoding credentials at all.
+   - If you update any shared library, re-copy its `src/` files here.
 3. `#define SHOW_US_CITIES` (disabled by default) also cycles through two
    more cities' current conditions between the local weather and forecast
    pages.

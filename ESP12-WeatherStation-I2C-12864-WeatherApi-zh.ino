@@ -11,7 +11,11 @@
 #include <SPI.h>
 #include <WiFiManager.h>
 #include "WeatherApiWeather.h"
-#include "GarfieldCommon.h"
+#include "StringHelpers.h"
+#include "AlarmBeeper.h"
+#include "WiFiMultiConnect.h"
+#include "WeatherDisplayHelpers.h"
+#include "BootSplashBitmap.h"
 
 #define CURRENT_VERSION 6
 #define DEBUG
@@ -33,22 +37,21 @@
 
 
 // Serial 200 to 207
-int Resistor = 80000;
 bool dummyMode = false;
-bool backlightOffMode = false;
-
-int displayContrast = 128;
-int displayMultiplier = 100;
-int displayBias = 0;
-
-int displayMinimumLevel = 1;
-int displayMaximumLevel = 1023;
 
 int temperatureMultiplier = 100;
 int temperatureBias = -3;
 
 int humidityMultiplier = 89;
 int humidityBias = 0;
+
+// Fill in your own SSID/password pairs (or better, use USE_WIFI_MANAGER above
+// instead of hardcoding any of this). Never commit real WiFi credentials.
+const char* const WIFI_SSIDS[] = {"YOUR_SSID_1", "YOUR_SSID_2", "YOUR_SSID_3"};
+const char* const WIFI_PASSWORDS[] = {"YOUR_PASSWORD_1", "YOUR_PASSWORD_2", "YOUR_PASSWORD_3"};
+
+const String WEATHERAPI_APP_ID = "YOUR_WEATHERAPI_COM_KEY"; // https://www.weatherapi.com/
+#define MAX_FORECASTS 5
 
 #define DHTTYPE  DHT11       // Sensor type DHT11/21/22/AM2301/AM2302
 #define SMOKEPIN   2
@@ -272,7 +275,7 @@ void setup() {
 
   pinMode(SMOKEPIN, INPUT);
   pinMode(ALARMPIN, OUTPUT);
-  noBeep(ALARMPIN,
+  beepOff(ALARMPIN,
 #ifdef USE_HIGH_ALARM
          true
 #else
@@ -301,7 +304,7 @@ void setup() {
   display.clearBuffer();
   display.drawXBM(31, 0, 66, 64, garfield);
   display.sendBuffer();
-  shortBeep(ALARMPIN,
+  beepShort(ALARMPIN,
 #ifdef USE_HIGH_ALARM
             true
 #else
@@ -315,17 +318,11 @@ void setup() {
 
 #ifdef USE_WIFI_MANAGER
   drawProgress("连接WIFI:", "ESP8266-Setup");
+  connectWiFiWithManager("ESP8266-Setup");
 #else
   drawProgress("连接WIFI中,", "请稍等...");
+  connectWiFi(WIFI_SSIDS, WIFI_PASSWORDS, 3);
 #endif
-
-  connectWIFI(
-#ifdef USE_WIFI_MANAGER
-    true
-#else
-    false
-#endif
-  );
 
   if (WiFi.status() != WL_CONNECTED) ESP.restart();
 
@@ -334,7 +331,7 @@ void setup() {
   Serial.println("WIFI Connected");
 #endif
   drawProgress("连接WIFI成功,", "正在同步时间...");
-  configTime(TZ_SEC, DST_SEC, NTP_SERVER);
+  configTime(TZ_SEC_FOR(8), DST_SEC_FOR(0), DefaultNtpServer);
   drawProgress("同步时间成功,", "正在更新天气数据...");
   updateData(true);
   timeSinceLastWUpdate = millis();
@@ -605,7 +602,7 @@ void drawLocal() {
   stringWidth = display.getUTF8Width(string2char(String(currentWeather.text)));
   display.setCursor((128 - stringWidth) / 2, 40);
   display.print(String(currentWeather.text));
-  String WindDirectionAndSpeed = windDirectionTranslate(currentWeather.wind_dir) + String(currentWeather.wind_kph) + "km/h";
+  String WindDirectionAndSpeed = translateWindDirectionToChinese(currentWeather.wind_dir) + String(currentWeather.wind_kph) + "km/h";
   stringWidth = display.getUTF8Width(string2char(WindDirectionAndSpeed));
   display.setCursor((128 - stringWidth) / 2, 54);
   display.print(WindDirectionAndSpeed);
@@ -620,7 +617,7 @@ void drawLocal() {
   display.drawStr((128 - 30 - stringWidth) / 2, 11, buff);
 
   display.setFont(Meteocon21);
-  display.drawStr(98, 17, string2char(chooseMeteocon(currentWeather.iconMeteoCon)));
+  display.drawStr(98, 17, string2char(chooseMeteoconChar(currentWeather.iconMeteoCon)));
 
   display.setFont(u8g2_font_helvR08_tf);
   String temp = String(currentWeather.temp_c, 0) + degree + "C";
@@ -655,7 +652,7 @@ void drawLocal() {
 
 #ifdef SHOW_US_CITIES
 void drawWorldLocation(String stringText, Timezone tztTimeZone, WeatherApiCurrentData currentWeather) {
-  time_t utc = time(nullptr) - TZ_SEC;
+  time_t utc = time(nullptr) - TZ_SEC_FOR(8);
   TimeChangeRule *tcr;        // pointer to the time change rule, use to get the TZ abbrev
   time_t t = tztTimeZone.toLocal(utc, &tcr);
   char buff[5];
@@ -669,7 +666,7 @@ void drawWorldLocation(String stringText, Timezone tztTimeZone, WeatherApiCurren
   stringWidth = display.getUTF8Width(string2char(String(currentWeather.text)));
   display.setCursor((128 - stringWidth) / 2, 40);
   display.print(String(currentWeather.text));
-  String WindDirectionAndSpeed = windDirectionTranslate(currentWeather.wind_dir) + String(currentWeather.wind_kph) + "km/h";
+  String WindDirectionAndSpeed = translateWindDirectionToChinese(currentWeather.wind_dir) + String(currentWeather.wind_kph) + "km/h";
   stringWidth = display.getUTF8Width(string2char(WindDirectionAndSpeed));
   display.setCursor((128 - stringWidth) / 2, 54);
   display.print(WindDirectionAndSpeed);
