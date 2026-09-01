@@ -10,8 +10,7 @@
 #include <U8g2lib.h>
 #include <SPI.h>
 #include <WiFiManager.h>
-#include "HeWeatherCurrent.h"
-#include "HeWeatherForecast.h"
+#include "WeatherApiWeather.h"
 #include "GarfieldCommon.h"
 
 #define CURRENT_VERSION 6
@@ -72,19 +71,19 @@ DHT dht(DHTPIN, DHTTYPE);
 #endif
 
 #ifdef LANGUAGE_CN
-const String HEWEATHER_LANGUAGE = "zh"; // zh for Chinese, en for English
+const String WEATHERAPI_LANGUAGE = "zh"; // zh for Chinese, en for English
 #else ifdef LANGUAGE_EN
-const String HEWEATHER_LANGUAGE = "en"; // zh for Chinese, en for English
+const String WEATHERAPI_LANGUAGE = "en"; // zh for Chinese, en for English
 #endif
 
 #ifdef USE_WIFI_MANAGER
-const String HEWEATHER_LOCATION = "auto_ip"; // Get location from IP address
+const String WEATHERAPI_LOCATION = "auto:ip"; // WeatherAPI.com: resolve location from the request's IP address
 #else
-const String HEWEATHER_LOCATION = "CN101210202"; // Changxing
+const String WEATHERAPI_LOCATION = "YOUR_CITY"; // e.g. "London", "New York", or "lat,lon" - see WeatherAPI.com docs
 #endif
 #ifdef SHOW_US_CITIES
-const String HEWEATHER_LOCATION1 = "US3290117";
-const String HEWEATHER_LOCATION2 = "US5392171";
+const String WEATHERAPI_LOCATION1 = "New York";
+const String WEATHERAPI_LOCATION2 = "Fremont";
 #endif
 
 #ifdef LANGUAGE_CN
@@ -128,18 +127,18 @@ TimeChangeRule usPST = {"PST", First, Sun, Nov, 2, -480};
 Timezone usPT(usPDT, usPST);
 #endif
 
-HeWeatherCurrentData currentWeather;
-HeWeatherCurrent currentWeatherClient;
+WeatherApiCurrentData currentWeather;
+WeatherApiForecastData forecasts[MAX_FORECASTS];
+WeatherApiWeather weatherClient;
 
 #ifdef SHOW_US_CITIES
-HeWeatherCurrentData currentWeather1;
-HeWeatherCurrentData currentWeather2;
-HeWeatherCurrent currentWeatherClient1;
-HeWeatherCurrent currentWeatherClient2;
+WeatherApiCurrentData currentWeather1;
+WeatherApiCurrentData currentWeather2;
+WeatherApiForecastData forecastUnused1[1]; // only current conditions are shown for these cities
+WeatherApiForecastData forecastUnused2[1];
+WeatherApiWeather weatherClient1;
+WeatherApiWeather weatherClient2;
 #endif
-
-HeWeatherForecastData forecasts[MAX_FORECASTS];
-HeWeatherForecast forecastClient;
 
 U8G2_ST7920_128X64_F_SW_SPI display(U8G2_R0, /* clo  ck=*/ 14 /* A4 */ , /* data=*/ 12 /* A2 */, /* CS=*/ 13 /* A3 */, /* reset=*/ U8X8_PIN_NONE); // 16, U8X8_PIN_NONE
 //U8G2_ST7920_128X64_F_SW_SPI display(U8G2_R0, /* clo  ck=*/ 14 /* A4 */ , /* data=*/ 12 /* A2 */, /* CS=*/ 13 /* A3 */, /* reset=*/ 16); // 16, U8X8_PIN_NONE, serial 202 has reset pin removed!!!
@@ -315,7 +314,7 @@ void setup() {
   delay(1000);
 
 #ifdef USE_WIFI_MANAGER
-  drawProgress("连接WIFI:", "IBECloc12864-HW");
+  drawProgress("连接WIFI:", "ESP8266-Setup");
 #else
   drawProgress("连接WIFI中,", "请稍等...");
 #endif
@@ -481,7 +480,11 @@ void updateData(bool isInitialBoot) {
   {
     drawProgress("正在更新...", "本地天气实况...");
   }
-  currentWeatherClient.updateCurrent(&currentWeather, HEWEATHER_APP_ID, HEWEATHER_LOCATION, HEWEATHER_LANGUAGE);
+  // WeatherAPI.com's forecast.json returns current conditions + forecast in one
+  // request, so - unlike the old HeWeather current/forecast split - both are
+  // refreshed together every update instead of forecast being fetched separately
+  // only a few times a day.
+  weatherClient.updateWeather(&currentWeather, forecasts, WEATHERAPI_APP_ID, WEATHERAPI_LOCATION, WEATHERAPI_LANGUAGE, MAX_FORECASTS);
 
   if (!dummyMode)
   {
@@ -491,24 +494,14 @@ void updateData(bool isInitialBoot) {
     {
       drawProgress("正在更新...", "纽约天气实况...");
     }
-    currentWeatherClient1.updateCurrent(&currentWeather1, HEWEATHER_APP_ID, HEWEATHER_LOCATION1, HEWEATHER_LANGUAGE);
+    weatherClient1.updateWeather(&currentWeather1, forecastUnused1, WEATHERAPI_APP_ID, WEATHERAPI_LOCATION1, WEATHERAPI_LANGUAGE, 1);
     delay(300);
     if (isInitialBoot)
     {
       drawProgress("正在更新...", "弗利蒙天气实况...");
     }
-    currentWeatherClient2.updateCurrent(&currentWeather2, HEWEATHER_APP_ID, HEWEATHER_LOCATION2, HEWEATHER_LANGUAGE);
+    weatherClient2.updateWeather(&currentWeather2, forecastUnused2, WEATHERAPI_APP_ID, WEATHERAPI_LOCATION2, WEATHERAPI_LANGUAGE, 1);
 #endif
-
-    if (isInitialBoot || timeInfo->tm_hour == 0 || timeInfo->tm_hour == 8 || timeInfo->tm_hour == 11 || timeInfo->tm_hour == 18)
-    {
-      delay(300);
-      if (isInitialBoot)
-      {
-        drawProgress("正在更新...", "本地天气预报...");
-      }
-      int result = forecastClient.updateForecast(forecasts, HEWEATHER_APP_ID, HEWEATHER_LOCATION, HEWEATHER_LANGUAGE);
-    }
   }
   readyForWeatherUpdate = false;
 }
@@ -609,16 +602,16 @@ void drawLocal() {
   int stringWidth = display.getUTF8Width(string2char(stringText));
   display.setCursor((128 - stringWidth) / 2, 1);
   display.print(stringText);
-  stringWidth = display.getUTF8Width(string2char(String(currentWeather.cond_txt)));
+  stringWidth = display.getUTF8Width(string2char(String(currentWeather.text)));
   display.setCursor((128 - stringWidth) / 2, 40);
-  display.print(String(currentWeather.cond_txt));
-  String WindDirectionAndSpeed = windDirectionTranslate(currentWeather.wind_dir) + String(currentWeather.wind_sc) + "级";
+  display.print(String(currentWeather.text));
+  String WindDirectionAndSpeed = windDirectionTranslate(currentWeather.wind_dir) + String(currentWeather.wind_kph) + "km/h";
   stringWidth = display.getUTF8Width(string2char(WindDirectionAndSpeed));
   display.setCursor((128 - stringWidth) / 2, 54);
   display.print(WindDirectionAndSpeed);
   display.disableUTF8Print();
 #ifdef USE_LED
-  processWeatherText(String(currentWeather.cond_txt));
+  processWeatherText(String(currentWeather.text));
 #endif
   display.setFont(u8g2_font_helvR24_tn); // u8g2_font_inb21_ mf, u8g2_font_helvR24_tn
   //  sprintf_P(buff, PSTR("%02d:%02d:%02d"), timeInfo->tm_hour, timeInfo->tm_min, timeInfo->tm_sec);
@@ -630,12 +623,12 @@ void drawLocal() {
   display.drawStr(98, 17, string2char(chooseMeteocon(currentWeather.iconMeteoCon)));
 
   display.setFont(u8g2_font_helvR08_tf);
-  String temp = String(currentWeather.tmp) + degree + "C";
+  String temp = String(currentWeather.temp_c, 0) + degree + "C";
   display.drawStr(0, 53, string2char(temp));
 
   display.setFont(u8g2_font_helvR08_tf);
-  stringWidth = display.getStrWidth(string2char((String(currentWeather.hum) + "%")));
-  display.drawStr(127 - stringWidth, 53, string2char((String(currentWeather.hum) + "%")));
+  stringWidth = display.getStrWidth(string2char((String(currentWeather.humidity) + "%")));
+  display.drawStr(127 - stringWidth, 53, string2char((String(currentWeather.humidity) + "%")));
 
   display.setFont(u8g2_font_helvB08_tf);
   if (previousTemp != 0 && previousHumidity != 0)
@@ -661,7 +654,7 @@ void drawLocal() {
 }
 
 #ifdef SHOW_US_CITIES
-void drawWorldLocation(String stringText, Timezone tztTimeZone, HeWeatherCurrentData currentWeather) {
+void drawWorldLocation(String stringText, Timezone tztTimeZone, WeatherApiCurrentData currentWeather) {
   time_t utc = time(nullptr) - TZ_SEC;
   TimeChangeRule *tcr;        // pointer to the time change rule, use to get the TZ abbrev
   time_t t = tztTimeZone.toLocal(utc, &tcr);
@@ -673,10 +666,10 @@ void drawWorldLocation(String stringText, Timezone tztTimeZone, HeWeatherCurrent
   int stringWidth = display.getUTF8Width(string2char(stringTemp));
   display.setCursor((128 - stringWidth) / 2, 1);
   display.print(stringTemp);
-  stringWidth = display.getUTF8Width(string2char(String(currentWeather.cond_txt)));
+  stringWidth = display.getUTF8Width(string2char(String(currentWeather.text)));
   display.setCursor((128 - stringWidth) / 2, 40);
-  display.print(String(currentWeather.cond_txt));
-  String WindDirectionAndSpeed = windDirectionTranslate(currentWeather.wind_dir) + String(currentWeather.wind_sc) + "级";
+  display.print(String(currentWeather.text));
+  String WindDirectionAndSpeed = windDirectionTranslate(currentWeather.wind_dir) + String(currentWeather.wind_kph) + "km/h";
   stringWidth = display.getUTF8Width(string2char(WindDirectionAndSpeed));
   display.setCursor((128 - stringWidth) / 2, 54);
   display.print(WindDirectionAndSpeed);
@@ -686,10 +679,10 @@ void drawWorldLocation(String stringText, Timezone tztTimeZone, HeWeatherCurrent
   //  stringTemp = String(hour(t)) + ":" + String(minute(t));
   stringWidth = display.getStrWidth(buff);
   display.drawStr((128 - 30 - stringWidth) / 2, 11, buff);
-  String temp = String(currentWeather.tmp) + degree + "C";
+  String temp = String(currentWeather.temp_c, 0) + degree + "C";
   display.setFont(u8g2_font_helvR08_tf);
   display.drawStr(0, 53, string2char(temp));
-  String tempHumidity = String(currentWeather.hum) + "%";
+  String tempHumidity = String(currentWeather.humidity) + "%";
   stringWidth = display.getStrWidth(string2char(tempHumidity));
   display.setFont(u8g2_font_helvR08_tf);
   display.drawStr(128 - stringWidth, 53, string2char(tempHumidity));
@@ -737,7 +730,9 @@ void drawForecastDetails(int dayIndex) {
   display.print(stringText);
 
   // each Chinese character's length is 3 in UTF-8
-  stringText = String("日:" + forecasts[dayIndex].cond_txt_d);
+  // WeatherAPI.com's daily forecast has one overall condition, not a separate
+  // day/night pair like the old HeWeather forecast did.
+  stringText = String("天气:" + forecasts[dayIndex].text);
   stringText.replace("\"", "");
   stringText.trim();
   if (stringText.length() > 21)
@@ -745,41 +740,31 @@ void drawForecastDetails(int dayIndex) {
     stringText = stringText.substring(0, 21);
     stringText.trim();
   }
-  display.setCursor(26, 18);
+  display.setCursor(26, 24);
   display.print(stringText);
 
-  // each Chinese character's length is 3 in UTF-8
-  stringText = String("夜:" + forecasts[dayIndex].cond_txt_n);
-  stringText.replace("\"", "");
-  stringText.trim();
-  if (stringText.length() > 21)
-  {
-    stringText = stringText.substring(0, 21);
-    stringText.trim();
-  }
-  display.setCursor(26, 36);
-  display.print(stringText);
-
-  stringText = windDirectionTranslate(String(forecasts[dayIndex].wind_dir)) + String(forecasts[dayIndex].wind_sc) + "级";
+  // WeatherAPI.com's daily forecast gives a peak wind speed only, no
+  // direction (direction is only available at hourly granularity).
+  stringText = String(forecasts[dayIndex].maxwind_kph, 0) + "km/h";
   stringWidth = display.getUTF8Width(string2char(stringText));
   display.setCursor(0, 54);
   display.print(stringText);
   display.disableUTF8Print();
 
   display.setFont(u8g2_font_helvR08_tf);
-  stringText = String(forecasts[dayIndex].hum) + "%";
+  stringText = String(forecasts[dayIndex].avghumidity) + "%";
   stringWidth = display.getStrWidth(string2char(stringText));
   display.drawStr(128 - stringWidth, 1, string2char(stringText));
 
-  stringText = String(forecasts[dayIndex].tmp_max) + degree + "C";
+  stringText = String(forecasts[dayIndex].maxtemp_c, 0) + degree + "C";
   stringWidth = display.getStrWidth(string2char(stringText));
   display.drawStr(128 - stringWidth, 18, string2char(stringText));
 
-  stringText = String(forecasts[dayIndex].tmp_min) + degree + "C";
+  stringText = String(forecasts[dayIndex].mintemp_c, 0) + degree + "C";
   stringWidth = display.getStrWidth(string2char(stringText));
   display.drawStr(128 - stringWidth, 35, string2char(stringText));
 
-  stringText = String(String(forecasts[dayIndex].pcpn, 1) + "mm") + "  " + String(forecasts[dayIndex].pop) + "%";
+  stringText = String(String(forecasts[dayIndex].totalprecip_mm, 1) + "mm") + "  " + String(forecasts[dayIndex].chanceOfRain) + "%";
   stringWidth = display.getStrWidth(string2char(stringText));
   display.drawStr(128 - stringWidth, 53, string2char(stringText));
 
