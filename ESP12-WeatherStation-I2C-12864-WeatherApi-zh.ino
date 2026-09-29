@@ -75,7 +75,7 @@ DHT dht(DHTPIN, DHTTYPE);
 
 #ifdef LANGUAGE_CN
 const String WEATHERAPI_LANGUAGE = "zh"; // zh for Chinese, en for English
-#else ifdef LANGUAGE_EN
+#else ifdef LANGUAGE_EN // NOTE: '#else ifdef' is not valid preprocessor; use plain '#else'
 const String WEATHERAPI_LANGUAGE = "en"; // zh for Chinese, en for English
 #endif
 
@@ -91,7 +91,7 @@ const String WEATHERAPI_LOCATION2 = "Fremont";
 
 #ifdef LANGUAGE_CN
 const String WDAY_NAMES[] = { "星期天", "星期一", "星期二", "星期三", "星期四", "星期五", "星期六" };
-#else ifdef LANGUAGE_EN
+#else ifdef LANGUAGE_EN // NOTE: '#else ifdef' is not valid preprocessor; use plain '#else'
 const String WDAY_NAMES[] = { "SUN", "MON", "TUE", "WED", "THU", "FRI", "SAT" };
 #endif
 
@@ -160,42 +160,52 @@ long timeSinceLastPageUpdate = 0;
 long timeSinceSystemBoot = 0;
 #define SMOKE_DISABLE_PERIOD 120*1000
 unsigned long smokeDebounceTime = 1000 * 10; // 10 seconds debounce time
-unsigned long smokeLastDebounce = 0;
-int previousSmokeValue = 0;
+unsigned long smokeLastDebounce = 0;int previousSmokeValue = 0;
 volatile boolean smokeSendEmail = false;
+volatile boolean smokeEventSeen = false;
 
 void ICACHE_RAM_ATTR smokeHandler ();
 
+// Minimal ISR: only flags the event. The alarm output, LEDs and any Serial
+// output are driven from loop() (see smokeCheckInterruptSub) because calls that
+// are not IRAM-safe (Serial, String, etc.) inside an ISR can crash the ESP8266
+// or trip the software watchdog - especially dangerous on a smoke-alarm path.
 void smokeHandler() {
-  int smokeValue = digitalRead(SMOKEPIN);
-  Serial.print("Smoke interrupt: ");
-  Serial.println(smokeValue);
-  smokeSendEmail = true;
-  if (smokeValue == 1)
-  {
-#ifdef USE_HIGH_ALARM
-    digitalWrite(ALARMPIN, LOW);
-#else
-    digitalWrite(ALARMPIN, HIGH);
-#endif
-#ifdef USE_LED
-    ledoff();
-#endif
-  }
-  else
-  {
-#ifdef USE_HIGH_ALARM
-    digitalWrite(ALARMPIN, HIGH);
-#else
-    digitalWrite(ALARMPIN, LOW);
-#endif
-#ifdef USE_LED
-    ledred();
-#endif
-  }
+  smokeEventSeen = true;
 }
 
 void smokeCheckInterruptSub() {
+  // Consume the ISR flag here in loop context, preserving the original ISR's
+  // semantics: the smoke pin is active-LOW (LOW = smoke detected = alarm ON).
+  if (smokeEventSeen)
+  {
+    smokeEventSeen = false;
+    int smokeValue = digitalRead(SMOKEPIN);
+    if (smokeValue == 0)
+    {
+#ifdef USE_HIGH_ALARM
+      digitalWrite(ALARMPIN, HIGH);
+#else
+      digitalWrite(ALARMPIN, LOW);
+#endif
+#ifdef USE_LED
+      ledred();
+#endif
+    }
+    else
+    {
+#ifdef USE_HIGH_ALARM
+      digitalWrite(ALARMPIN, LOW);
+#else
+      digitalWrite(ALARMPIN, HIGH);
+#endif
+#ifdef USE_LED
+      ledoff();
+#endif
+    }
+    smokeSendEmail = true;
+  }
+
   nowTime = time(nullptr);
   struct tm* timeInfo;
   timeInfo = localtime(&nowTime);
@@ -653,7 +663,7 @@ void drawWorldLocation(String stringText, Timezone tztTimeZone, WeatherApiCurren
   time_t utc = time(nullptr) - TZ_SEC_FOR(8);
   TimeChangeRule *tcr;        // pointer to the time change rule, use to get the TZ abbrev
   time_t t = tztTimeZone.toLocal(utc, &tcr);
-  char buff[5];
+  char buff[6]; // "HH:MM" needs 6 bytes including the NUL (was 5, one byte short)
   sprintf(buff, "%02d:%02d", hour(t), minute(t));
   display.enableUTF8Print();
   display.setFont(u8g2_font_wqy12_t_gb2312); // u8g2_font_wqy12_t_gb2312, u8g2_font_helvB08_tf
