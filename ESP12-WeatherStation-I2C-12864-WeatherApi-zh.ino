@@ -157,6 +157,8 @@ float previousHumidity = 0;
 long timeSinceLastPageUpdate = 0;
 #define PAGE_UPDATE_INTERVAL 3*1000
 
+#define UPDATE_INTERVAL_SECS 1500  // weather refresh period in seconds (15 min, matching the sibling sketches) - was used but never defined, which broke the build
+
 long timeSinceSystemBoot = 0;
 #define SMOKE_DISABLE_PERIOD 120*1000
 unsigned long smokeDebounceTime = 1000 * 10; // 10 seconds debounce time
