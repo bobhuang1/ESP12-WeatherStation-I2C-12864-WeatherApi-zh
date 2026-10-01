@@ -46,3 +46,8 @@ two additional world cities' current conditions.
   esp8266-weather-WeatherApi's README for details.
 - `#define LANGUAGE_CN` / comment it out to switch the on-screen text between
   Chinese and English.
+
+
+## License
+
+This project is free software, released under the **GNU General Public License v3.0**. You may redistribute and/or modify it under those terms; see [LICENSE.md](LICENSE.md) for the full text.
