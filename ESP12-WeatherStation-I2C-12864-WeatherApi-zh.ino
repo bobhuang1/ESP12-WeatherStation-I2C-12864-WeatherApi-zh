@@ -165,14 +165,25 @@ unsigned long smokeDebounceTime = 1000 * 10; // 10 seconds debounce time
 unsigned long smokeLastDebounce = 0;int previousSmokeValue = 0;
 volatile boolean smokeSendEmail = false;
 volatile boolean smokeEventSeen = false;
+volatile boolean smokeActive = false;   // smoke input currently asserted (LOW)
 
-void ICACHE_RAM_ATTR smokeHandler ();
+void IRAM_ATTR smokeHandler ();
 
-// Minimal ISR: only flags the event. The alarm output, LEDs and any Serial
-// output are driven from loop() (see smokeCheckInterruptSub) because calls that
-// are not IRAM-safe (Serial, String, etc.) inside an ISR can crash the ESP8266
-// or trip the software watchdog - especially dangerous on a smoke-alarm path.
+// Drives the buzzer straight from the pin state. Runs in the ISR (digitalRead and
+// digitalWrite are IRAM-safe on the ESP8266 core) so the alarm sounds even while
+// setup() or a weather download is blocking loop(). LEDs and Serial output stay in
+// loop() (smokeCheckInterruptSub), since those calls are not ISR-safe.
+void IRAM_ATTR applySmokeAlarm() {
+  smokeActive = (digitalRead(SMOKEPIN) == LOW);
+#ifdef USE_HIGH_ALARM
+  digitalWrite(ALARMPIN, smokeActive ? HIGH : LOW);
+#else
+  digitalWrite(ALARMPIN, smokeActive ? LOW : HIGH);
+#endif
+}
+
 void smokeHandler() {
+  applySmokeAlarm();
   smokeEventSeen = true;
 }
 
@@ -182,29 +193,17 @@ void smokeCheckInterruptSub() {
   if (smokeEventSeen)
   {
     smokeEventSeen = false;
-    int smokeValue = digitalRead(SMOKEPIN);
-    if (smokeValue == 0)
-    {
-#ifdef USE_HIGH_ALARM
-      digitalWrite(ALARMPIN, HIGH);
-#else
-      digitalWrite(ALARMPIN, LOW);
-#endif
+    // The buzzer was already switched by the ISR; this mirrors it on the LED.
 #ifdef USE_LED
+    if (smokeActive)
+    {
       ledred();
-#endif
     }
     else
     {
-#ifdef USE_HIGH_ALARM
-      digitalWrite(ALARMPIN, LOW);
-#else
-      digitalWrite(ALARMPIN, HIGH);
-#endif
-#ifdef USE_LED
       ledoff();
-#endif
     }
+#endif
     smokeSendEmail = true;
   }
 
@@ -295,6 +294,13 @@ void setup() {
 #endif
         );
 
+  // Arm the smoke alarm before anything that can block (display tests, WiFi, the first
+  // weather download), and evaluate the input once: smoke that is already present at
+  // power-up produces no edge, so the interrupt alone would never sound it.
+  attachInterrupt(digitalPinToInterrupt(SMOKEPIN), smokeHandler, CHANGE);
+  applySmokeAlarm();
+  smokeEventSeen = true;
+
 #ifdef USE_LED
   pinMode(LEDRED, OUTPUT);
 
@@ -316,13 +322,16 @@ void setup() {
   display.clearBuffer();
   display.drawXBM(31, 0, 66, 64, garfield);
   display.sendBuffer();
-  beepShort(ALARMPIN,
+  if (!smokeActive)
+  {
+    beepShort(ALARMPIN,
 #ifdef USE_HIGH_ALARM
-            true
+              true
 #else
-            false
+              false
 #endif
-           );
+             );
+  }
   delay(1000);
 
   drawProgress(String(CompileDate), "Version: " + String(CURRENT_VERSION));
@@ -330,13 +339,21 @@ void setup() {
 
 #ifdef USE_WIFI_MANAGER
   drawProgress("连接WIFI:", "ESP8266-Setup");
-  connectWiFiWithManager("ESP8266-Setup");
+  bool wifiOk = connectWiFiWithManager("ESP8266-Setup", 180);
 #else
   drawProgress("连接WIFI中,", "请稍等...");
-  connectWiFi(WIFI_SSIDS, WIFI_PASSWORDS, 3);
+  bool wifiOk = connectWiFi(WIFI_SSIDS, WIFI_PASSWORDS, 3, 30, 60UL * 1000UL);
 #endif
 
-  if (WiFi.status() != WL_CONNECTED) ESP.restart();
+  // The smoke alarm and the indoor sensor work without the network; only the weather
+  // pages need it.
+  if (!wifiOk)
+  {
+    drawProgress("WIFI连接失败", "离线运行");
+    delay(2000);
+    timeSinceSystemBoot = millis();
+    return;
+  }
 
   // Get time from network time service
 #ifdef DEBUG
@@ -349,7 +366,6 @@ void setup() {
   timeSinceLastWUpdate = millis();
   timeSinceSystemBoot = millis();
   previousSmokeValue = digitalRead(SMOKEPIN);
-  attachInterrupt(digitalPinToInterrupt(SMOKEPIN), smokeHandler, CHANGE);
 }
 
 void loop() {
@@ -373,7 +389,7 @@ void loop() {
   }
   if (draw_state >= 12) draw_state = 0;
 
-  if (millis() - timeSinceLastWUpdate > (1000 * UPDATE_INTERVAL_SECS)) {
+  if (millis() - timeSinceLastWUpdate > (1000 * UPDATE_INTERVAL_SECS) && WiFi.status() == WL_CONNECTED) {
     setReadyForWeatherUpdate();
     timeSinceLastWUpdate = millis();
   }
@@ -618,7 +634,8 @@ void drawLocal() {
   display.print(WindDirectionAndSpeed);
   display.disableUTF8Print();
 #ifdef USE_LED
-  processWeatherText(String(currentWeather.text));
+  // The smoke alarm owns the LED while it is active.
+  if (!smokeActive) processWeatherText(String(currentWeather.text));
 #endif
   display.setFont(u8g2_font_helvR24_tn); // u8g2_font_inb21_ mf, u8g2_font_helvR24_tn
   //  sprintf_P(buff, PSTR("%02d:%02d:%02d"), timeInfo->tm_hour, timeInfo->tm_min, timeInfo->tm_sec);
